@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
+from time import perf_counter
 
 class PersonDetector:
 
@@ -92,83 +93,112 @@ class PersonDetector:
 
         return image, scale, left, top
 
+
     def detect(self, frame):
+
+        t0 = perf_counter()
 
         image, scale, pad_x, pad_y = self.preprocess(frame)
 
-        # Inferência
+        t1 = perf_counter()
+
         outputs = self.session.run(
             [self.output_name],
             {self.input_name: image}
         )
 
+        t2 = perf_counter()
+
         predictions = outputs[0][0]
 
-        # YOLO11 normalmente retorna [84, 8400].
-        # Transpõe para [8400, 84].
         if predictions.shape[0] < predictions.shape[1]:
             predictions = predictions.T
 
-        boxes = []
-        scores = []
+        frame_height, frame_width = frame.shape[:2]
 
-        for prediction in predictions:
+        # Filtra diretamente a classe 0 (pessoa)
+        person_scores = predictions[:, 4]
 
-            # 4 coordenadas + 80 classes COCO
-            class_scores = prediction[4:]
+        mask = person_scores >= self.confidence
 
-            class_id = int(np.argmax(class_scores))
-            confidence = float(class_scores[class_id])
+        person_predictions = predictions[mask]
 
-            # Classe 0 = pessoa
-            if class_id != 0 or confidence < self.confidence:
-                continue
+        scores = person_scores[mask]
 
-            center_x, center_y, box_width, box_height = prediction[:4]
+        # Converte todas as caixas simultaneamente
+        centers = person_predictions[:, :2]
+        sizes = person_predictions[:, 2:4]
 
-            # Converte XYWH para XYXY
-            x1 = (center_x - box_width / 2 - pad_x) / scale
-            y1 = (center_y - box_height / 2 - pad_y) / scale
-            x2 = (center_x + box_width / 2 - pad_x) / scale
-            y2 = (center_y + box_height / 2 - pad_y) / scale
+        x1 = (centers[:, 0] - sizes[:, 0] / 2 - pad_x) / scale
+        y1 = (centers[:, 1] - sizes[:, 1] / 2 - pad_y) / scale
 
-            height, width = frame.shape[:2]
+        x2 = (centers[:, 0] + sizes[:, 0] / 2 - pad_x) / scale
+        y2 = (centers[:, 1] + sizes[:, 1] / 2 - pad_y) / scale
 
-            x1 = int(np.clip(x1, 0, width - 1))
-            y1 = int(np.clip(y1, 0, height - 1))
-            x2 = int(np.clip(x2, 0, width - 1))
-            y2 = int(np.clip(y2, 0, height - 1))
+        x1 = np.clip(x1, 0, frame_width - 1).astype(np.int32)
+        y1 = np.clip(y1, 0, frame_height - 1).astype(np.int32)
 
-            if x2 <= x1 or y2 <= y1:
-                continue
+        x2 = np.clip(x2, 0, frame_width - 1).astype(np.int32)
+        y2 = np.clip(y2, 0, frame_height - 1).astype(np.int32)
 
-            boxes.append([
-                x1,
-                y1,
-                x2 - x1,
-                y2 - y1
-            ])
+        valid = (x2 > x1) & (y2 > y1)
 
-            scores.append(confidence)
+        boxes = np.column_stack((
+            x1[valid],
+            y1[valid],
+            x2[valid] - x1[valid],
+            y2[valid] - y1[valid]
+        ))
 
-        # Remove detecções duplicadas
-        indexes = cv2.dnn.NMSBoxes(
-            boxes,
-            scores,
-            self.confidence,
-            self.iou_threshold
-        )
+        scores = scores[valid]
+
+        t3 = perf_counter()
+
+        # NMS continua sendo executado pelo OpenCV
+        if len(boxes) > 0:
+
+            indexes = cv2.dnn.NMSBoxes(
+                boxes.tolist(),
+                scores.tolist(),
+                self.confidence,
+                self.iou_threshold
+            )
+
+            indexes = np.array(indexes).flatten()
+
+        else:
+            indexes = []
+
+        t4 = perf_counter()
 
         detections = []
 
-        for index in np.array(indexes).flatten():
+        for index in indexes:
 
             x, y, width, height = boxes[index]
 
             detections.append({
                 "class_id": 0,
-                "confidence": scores[index],
-                "box": (x, y, x + width, y + height)
+                "confidence": float(scores[index]),
+                "box": (
+                    int(x),
+                    int(y),
+                    int(x + width),
+                    int(y + height)
+                )
             })
 
+        t5 = perf_counter()
+
+        self.last_timings = {
+            "preprocess": (t1 - t0) * 1000,
+            "inference": (t2 - t1) * 1000,
+            "decode": (t3 - t2) * 1000,
+            "nms": (t4 - t3) * 1000,
+            "output": (t5 - t4) * 1000,
+            "postprocess": (t5 - t2) * 1000,
+            "total": (t5 - t0) * 1000
+        }
+
         return detections
+

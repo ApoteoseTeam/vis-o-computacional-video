@@ -18,7 +18,7 @@ def main():
 
     # 1. Inicializar detector YOLO
     detector = PersonDetector(
-        model_path="models/yolo11n.onnx",
+        model_path="models/yolo11n_960.onnx",
         confidence=0.25
     )
 
@@ -63,19 +63,37 @@ def main():
             break
 
         start_time = time.perf_counter()
-
+        
         # ==================================
         # 1. DETECÇÃO YOLO
         # ==================================
 
         detections = detector.detect(frame)
+        if not hasattr(main, "timings"):
+            main.timings = []
 
+        main.timings.append(detector.last_timings.copy())
+
+        if len(main.timings) >= 100:
+
+            for key in ["preprocess", "inference", "postprocess", "total"]:
+
+                average = sum(
+                    item[key] for item in main.timings
+                ) / len(main.timings)
+
+                print(f"{key}: {average:.2f} ms")
+
+            main.timings.clear()
+
+        yolo_time = time.perf_counter()
         # ==================================
         # 2. RASTREAMENTO BYTETRACK
         # ==================================
 
         tracked = tracker.update(detections)
 
+        tracker_time = time.perf_counter()
         # ==================================
         # 3. CONTAGEM DE ENTRADAS E SAÍDAS
         # ==================================
@@ -85,6 +103,7 @@ def main():
             frame.shape[0]
         )
 
+        counter_time = time.perf_counter()
         # ==================================
         # 4. CONFIGURAÇÃO DAS LINHAS
         # ==================================
@@ -290,6 +309,12 @@ def main():
         line_counter.people_inside
     )
 
+    print(
+    f"YOLO: {(yolo_time - start_time) * 1000:.2f} ms | "
+    f"ByteTrack: {(tracker_time - yolo_time) * 1000:.2f} ms | "
+    f"LineCounter: {(counter_time - tracker_time) * 1000:.2f} ms"
+)
+    
     print("=" * 40)
 
 
