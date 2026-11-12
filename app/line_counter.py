@@ -13,7 +13,6 @@ class LineCounter:
         self.entries = 0
         self.exits = 0
 
-        # Guarda o estado individual de cada pessoa
         self.track_states = {}
 
     def update(self, tracked, frame_height):
@@ -31,23 +30,30 @@ class LineCounter:
 
         for i in range(len(tracked)):
 
-            track_id = int(tracked.tracker_id[i])
+            track_id = int(
+                tracked.tracker_id[i]
+            )
 
             if track_id < 0:
                 continue
 
             x1, y1, x2, y2 = tracked.xyxy[i]
 
-            center_y = int((y1 + y2) / 2)
+            center_y = int(
+                (y1 + y2) / 2
+            )
 
-            # Identifica a posição atual
+            # Identifica a posição da pessoa
             if center_y < upper_line:
+
                 current_side = -1
 
             elif center_y > lower_line:
+
                 current_side = 1
 
             else:
+
                 current_side = 0
 
             # Primeiro contato com a pessoa
@@ -68,19 +74,34 @@ class LineCounter:
             direction = None
 
             # Travessia completa da zona
-            if previous_side == -1 and current_side == 1:
+            if (
+                previous_side == -1
+                and current_side == 1
+            ):
+
                 direction = "IN"
 
-            elif previous_side == 1 and current_side == -1:
+            elif (
+                previous_side == 1
+                and current_side == -1
+            ):
+
                 direction = "OUT"
 
-            # Pessoa apareceu dentro da zona e saiu por um lado.
-            # Usa o movimento observado para inferir a direção.
-            elif previous_side == 0 and current_side == 1:
+            # Pessoa entrou na zona e saiu por um lado
+            elif (
+                previous_side == 0
+                and current_side == 1
+            ):
+
                 if center_y > previous_y:
                     direction = "IN"
 
-            elif previous_side == 0 and current_side == -1:
+            elif (
+                previous_side == 0
+                and current_side == -1
+            ):
+
                 if center_y < previous_y:
                     direction = "OUT"
 
@@ -101,8 +122,9 @@ class LineCounter:
                     f"OUT | Pessoa #{track_id}"
                 )
 
-            # Atualiza somente quando sair da zona
+            # Atualiza o lado somente fora da zona
             if current_side != 0:
+
                 state["side"] = current_side
 
             state["last_y"] = center_y
