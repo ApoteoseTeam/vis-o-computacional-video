@@ -16,7 +16,7 @@ class PersonTracker:
             minimum_consecutive_frames=1
         )
 
-    def update(self, detections):
+    def update(self, detections, timestamp=None):
 
         boxes = []
         confidences = []
